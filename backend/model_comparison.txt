@@ -1,0 +1,39 @@
+Model Performance Comparison
+============================
+
+Model: Logistic Regression
+  Accuracy: 1.0000
+  Precision: 1.0000
+  Recall: 1.0000
+  F1-score: 1.0000
+  ROC-AUC: 1.0000
+
+Model: Random Forest
+  Accuracy: 1.0000
+  Precision: 1.0000
+  Recall: 1.0000
+  F1-score: 1.0000
+  ROC-AUC: 1.0000
+
+Model: XGBoost
+  Accuracy: 0.9950
+  Precision: 0.0000
+  Recall: 0.0000
+  F1-score: 0.0000
+  ROC-AUC: 1.0000
+
+Model: Support Vector Machine
+  Accuracy: 0.9950
+  Precision: 0.0000
+  Recall: 0.0000
+  F1-score: 0.0000
+  ROC-AUC: 1.0000
+
+Model: Gradient Boosting
+  Accuracy: 1.0000
+  Precision: 1.0000
+  Recall: 1.0000
+  F1-score: 1.0000
+  ROC-AUC: 1.0000
+
+Best Model: Logistic Regression (F1-score: 1.0000)

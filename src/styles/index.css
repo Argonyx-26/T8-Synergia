@@ -1,3 +1,113 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
+
+@layer utilities {
+  .font-serif-title {
+    font-family: 'Playfair Display', Georgia, serif;
+  }
+}
+
+/* Custom Soft Pink & Ambient 3D Animation System */
+@keyframes floatParticle {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translateY(-18px) scale(1.1);
+    opacity: 0.8;
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 25px rgba(244, 114, 182, 0.25), 0 0 50px rgba(236, 72, 153, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(244, 114, 182, 0.45), 0 0 70px rgba(236, 72, 153, 0.25);
+  }
+}
+
+@keyframes floatCard {
+  0%, 100% {
+    transform: translateY(0px) rotateX(0deg);
+  }
+  50% {
+    transform: translateY(-4px) rotateX(1deg);
+  }
+}
+
+.animate-float-particle {
+  animation: floatParticle 6s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 4s ease-in-out infinite;
+}
+
+.animate-float-card {
+  animation: floatCard 5s ease-in-out infinite;
+}
+
+/* 3D Depth Card Classes */
+.card-3d {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 1.5rem;
+  box-shadow: 0 10px 30px -5px rgba(232, 180, 210, 0.25), 0 4px 12px 0 rgba(220, 150, 190, 0.1);
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-style: preserve-3d;
+  perspective: 1000px;
+}
+
+.card-3d:hover {
+  transform: translateY(-4px) scale(1.008);
+  box-shadow: 0 20px 40px -10px rgba(225, 150, 200, 0.35), 0 8px 20px -4px rgba(210, 130, 180, 0.18);
+  border-color: rgba(244, 114, 182, 0.3);
+}
+
+.card-3d-static {
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 1.5rem;
+  box-shadow: 0 10px 30px -5px rgba(232, 180, 210, 0.22);
+}
+
+/* Soft Tab Active Style */
+.tab-active {
+  background-color: #E6D2E5 !important;
+  color: #4D2C4E !important;
+  font-weight: 600 !important;
+  box-shadow: 0 4px 14px rgba(230, 210, 229, 0.6);
+}
+
+/* Custom Glowing Inputs */
+.input-blush {
+  background: #FFFFFF;
+  border: 1px solid rgba(244, 214, 227, 0.9);
+  border-radius: 0.85rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  color: #374151;
+  transition: all 0.25s ease;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.input-blush:focus {
+  outline: none;
+  border-color: #E895C2;
+  box-shadow: 0 0 0 3px rgba(232, 149, 194, 0.2), inset 0 1px 3px rgba(0, 0, 0, 0.01);
+}
+
+/* Custom Radial Progress 3D Ring */
+.radial-progress-3d {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-shadow: inset 0 0 20px rgba(244, 114, 182, 0.15), 0 10px 25px rgba(236, 72, 153, 0.2);
+}
