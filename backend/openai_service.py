@@ -48,10 +48,27 @@ EMOTIONAL INTELLIGENCE & PERSONALITY GUIDELINES:
    - For acute severe symptoms (unbearable pain or heavy bleeding), advise timely medical evaluation.
 """
 
+def get_anthropic_client():
+    """Initialize Anthropic client if an sk-ant- key is present."""
+    api_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key or not api_key.startswith("sk-ant-"):
+        openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        if openai_key.startswith("sk-ant-"):
+            api_key = openai_key
+    if api_key and api_key.startswith("sk-ant-"):
+        try:
+            import anthropic
+            return anthropic.Anthropic(api_key=api_key)
+        except Exception as e:
+            logger.error(f"Failed to initialize Anthropic client: {e}")
+            return None
+    return None
+
+
 def get_openai_client() -> Optional[OpenAI]:
     """Initialize OpenAI client if a valid API key is present."""
     api_key = (os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY or "").strip()
-    if not api_key or api_key in ["your_openai_api_key_here", "your_key_here"]:
+    if not api_key or api_key in ["your_openai_api_key_here", "your_key_here"] or api_key.startswith("sk-ant-"):
         return None
     try:
         return OpenAI(api_key=api_key)
@@ -186,9 +203,43 @@ def run_openai_chat(
     user_id: Optional[int] = None
 ) -> Dict[str, Any]:
     """
-    Main conversational agent loop with OpenAI Tool Calling, Empathetic Persona & Memory.
-    Falls back to intelligent companion mode if no external LLM API key is present.
+    Main conversational agent loop supporting Anthropic Claude, OpenAI, or Intelligent Fallback Companion.
     """
+    anthropic_client = get_anthropic_client()
+    if anthropic_client:
+        try:
+            system_content = SYSTEM_PROMPT
+            if user_id:
+                memory_summary = get_user_memory_context(db, user_id)
+                if memory_summary:
+                    system_content += f"\n\nAUTHENTICATED USER HEALTH & JOURNAL MEMORY CONTEXT:\n{memory_summary}"
+
+            anthropic_messages = []
+            for msg in history_messages[-10:]:
+                raw_role = (msg.get("role") or msg.get("sender") or "user").lower()
+                role = "assistant" if raw_role in ["assistant", "bot", "model", "ai"] else "user"
+                content = msg.get("content") or msg.get("text") or ""
+                if content:
+                    anthropic_messages.append({"role": role, "content": content})
+
+            anthropic_messages.append({"role": "user", "content": user_message})
+            anthropic_model = os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+
+            response = anthropic_client.messages.create(
+                model=anthropic_model,
+                max_tokens=800,
+                system=system_content,
+                messages=anthropic_messages
+            )
+            reply_text = response.content[0].text
+            return {
+                "reply": reply_text,
+                "tool_calls_executed": []
+            }
+        except Exception as e:
+            logger.error(f"Anthropic API Error: {str(e)}. Falling back to companion response.")
+            return get_fallback_chat_response(user_message, history_messages, db, user_id)
+
     client = get_openai_client()
     model_name = os.getenv("OPENAI_MODEL", OPENAI_MODEL)
 
