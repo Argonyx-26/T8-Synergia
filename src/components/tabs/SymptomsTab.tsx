@@ -67,10 +67,30 @@ export default function SymptomsTab() {
     }
   };
 
-  // Fetch journal entries from backend API
+  // Local Guest Storage Helpers
+  const loadGuestEntries = (): JournalItem[] => {
+    try {
+      const raw = localStorage.getItem("pcos_guest_journal_entries");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const saveGuestEntries = (entries: JournalItem[]) => {
+    localStorage.setItem("pcos_guest_journal_entries", JSON.stringify(entries));
+  };
+
+  // Fetch journal entries from backend API or local guest storage
   const fetchJournalHistory = async () => {
     if (!token) {
-      setJournalEntries([]);
+      const local = loadGuestEntries();
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        setJournalEntries(local.filter((e) => (e.freeText || "").toLowerCase().includes(q)));
+      } else {
+        setJournalEntries(local);
+      }
       return;
     }
     setLoadingHistory(true);
@@ -82,9 +102,11 @@ export default function SymptomsTab() {
       if (res.ok) {
         const data = await res.json();
         setJournalEntries(data);
+      } else {
+        setJournalEntries(loadGuestEntries());
       }
     } catch {
-      // Handle offline or request error silently
+      setJournalEntries(loadGuestEntries());
     } finally {
       setLoadingHistory(false);
     }
@@ -102,11 +124,6 @@ export default function SymptomsTab() {
       return;
     }
 
-    if (!token) {
-      setErrorMsg("Please sign in to save your personal health journal securely across devices.");
-      return;
-    }
-
     setSaving(true);
     setErrorMsg(null);
     setSaveSuccess(null);
@@ -115,6 +132,41 @@ export default function SymptomsTab() {
     const activeSymptomsList = Object.entries(symptoms)
       .filter(([_, val]) => val)
       .map(([key]) => key);
+
+    if (!token) {
+      // Save locally to localStorage for guest users
+      const newEntry: JournalItem = {
+        id: editingId || Date.now(),
+        entryDate,
+        freeText,
+        selectedSymptoms: activeSymptomsList,
+        tags: selectedTags,
+        emotionalContext: "recorded",
+        consentForAI,
+        createdAt: new Date().toISOString(),
+        extractedInsights: {
+          ai_label: "Personal Health Journal",
+          detected_emotion: "recorded",
+          reported_symptoms: activeSymptomsList,
+        },
+      };
+
+      const existing = loadGuestEntries();
+      let updated: JournalItem[];
+      if (editingId) {
+        updated = existing.map((item) => (item.id === editingId ? newEntry : item));
+      } else {
+        updated = [newEntry, ...existing];
+      }
+      saveGuestEntries(updated);
+      setJournalEntries(updated);
+      setSaveSuccess(editingId ? "Journal entry updated! ✨" : "Your personal journal entry has been saved! ❤️");
+      setFreeText("");
+      setSelectedTags([]);
+      setEditingId(null);
+      setSaving(false);
+      return;
+    }
 
     try {
       if (editingId) {
@@ -175,7 +227,13 @@ export default function SymptomsTab() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!token || !confirm("Are you sure you want to delete this journal entry?")) return;
+    if (!confirm("Are you sure you want to delete this journal entry?")) return;
+    if (!token) {
+      const updated = loadGuestEntries().filter((j) => j.id !== id);
+      saveGuestEntries(updated);
+      setJournalEntries(updated);
+      return;
+    }
     try {
       const res = await fetch(`/api/journal/${id}`, {
         method: "DELETE",
@@ -185,7 +243,9 @@ export default function SymptomsTab() {
         setJournalEntries(journalEntries.filter((j) => j.id !== id));
       }
     } catch {
-      alert("Failed to delete journal entry.");
+      const updated = loadGuestEntries().filter((j) => j.id !== id);
+      saveGuestEntries(updated);
+      setJournalEntries(updated);
     }
   };
 

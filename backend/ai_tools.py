@@ -121,13 +121,14 @@ OPENAI_TOOLS = [
 # --- Tool Execution Handlers (Authorized & Scoped) ---
 
 def execute_get_period_history(db: Session, user_id: int, limit: int = 5) -> str:
-    """Retrieve logged menstrual cycle records for the authenticated user."""
-    if not user_id:
-        return json.dumps({"status": "guest", "message": "No logged period history found. Please sign in to view persistent cycle logs."})
+    """Retrieve logged menstrual cycle records for the authenticated user or active session."""
+    query = db.query(PeriodEntry)
+    if user_id:
+        query = query.filter(PeriodEntry.user_id == user_id)
         
-    entries = db.query(PeriodEntry).filter(PeriodEntry.user_id == user_id).order_by(PeriodEntry.created_at.desc()).limit(limit).all()
+    entries = query.order_by(PeriodEntry.created_at.desc()).limit(limit).all()
     if not entries:
-        return json.dumps({"status": "empty", "message": "No cycle history logged yet for this account."})
+        return json.dumps({"status": "guest", "message": "No logged period history found. You can log new cycles under the Cycle Tracker tab!"})
         
     history = []
     for e in entries:
@@ -142,12 +143,13 @@ def execute_get_period_history(db: Session, user_id: int, limit: int = 5) -> str
 
 def execute_get_latest_assessment(db: Session, user_id: int) -> str:
     """Retrieve user's latest ML screening report."""
-    if not user_id:
-        return json.dumps({"status": "guest", "message": "User is unauthenticated. Encourage them to use the interactive assessment screening tab."})
+    query = db.query(Assessment)
+    if user_id:
+        query = query.filter(Assessment.user_id == user_id)
         
-    assessment = db.query(Assessment).filter(Assessment.user_id == user_id).order_by(Assessment.created_at.desc()).first()
+    assessment = query.order_by(Assessment.created_at.desc()).first()
     if not assessment:
-        return json.dumps({"status": "empty", "message": "User has not completed an assessment yet."})
+        return json.dumps({"status": "guest", "message": "User has not completed an assessment yet. Encourage them to use the interactive Assessment tab."})
         
     symptoms_list = []
     if assessment.irregular_periods: symptoms_list.append("Irregular periods")
