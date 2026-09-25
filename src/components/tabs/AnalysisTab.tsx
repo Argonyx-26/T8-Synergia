@@ -4,7 +4,7 @@ import { useAppStore } from "../../store";
 import { Download, Sparkles, AlertCircle, CheckCircle2, RotateCcw, Activity } from "lucide-react";
 
 export default function AnalysisTab() {
-  const { computeCriteriaBreakdown, result, clinicalInputs, symptoms, token, setResult } = useAppStore();
+  const { computeCriteriaBreakdown, result, clinicalInputs, symptoms, bodyMetrics, token, setResult } = useAppStore();
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState("");
 
@@ -19,6 +19,9 @@ export default function AnalysisTab() {
     setApiError("");
 
     try {
+      const heightVal = parseFloat(clinicalInputs.height || bodyMetrics.height) || 162;
+      const weightVal = parseFloat(clinicalInputs.weight || bodyMetrics.weight) || 60;
+
       const response = await fetch("/api/predict", {
         method: "POST",
         headers: {
@@ -28,8 +31,8 @@ export default function AnalysisTab() {
         body: JSON.stringify({
           clinicalInputs: {
             age: parseFloat(clinicalInputs.age) || 26,
-            height: parseFloat(clinicalInputs.height) || 162,
-            weight: parseFloat(clinicalInputs.weight) || 60,
+            height: heightVal,
+            weight: weightVal,
             cycleLength: parseFloat(clinicalInputs.cycleLength) || 28,
             cyclePeriod: parseFloat(clinicalInputs.cyclePeriod) || 5,
             bloodGlucose: clinicalInputs.bloodGlucose ? parseFloat(clinicalInputs.bloodGlucose) : null,

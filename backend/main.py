@@ -301,7 +301,41 @@ def predict_pcod(req: PredictionRequest, authorization: Optional[str] = None, db
     
     # Predict Probability
     prob = float(model.predict_proba(features_scaled)[0, 1])
-    risk_score = round(prob * 100)
+    
+    # Clinical evidence-based score (Rotterdam & AE-PCOS criteria)
+    clinical_score = 0
+    if s.irregularPeriods or s.noPeriods or c.cycleLength > 35 or c.cycleLength < 21:
+        clinical_score += 30
+        
+    symptom_count = sum([
+        int(s.excessHair), int(s.acne), int(s.hairLoss), int(s.darkPatches),
+        int(s.weightGain), int(s.difficultyLosingWeight), int(s.fatigue),
+        int(s.moodSwings), int(s.pelvicPain), int(s.infertility)
+    ])
+    clinical_score += min(45, symptom_count * 9)
+    
+    if bmi_val >= 25:
+        clinical_score += 15
+    if lh and fsh and fsh > 0 and (lh / fsh) >= 1.8:
+        clinical_score += 15
+    if testosterone and testosterone >= 45:
+        clinical_score += 10
+    if req.clinicalInputs.familyHistory:
+        clinical_score += 10
+
+    clinical_score = min(95, clinical_score)
+
+    # Combined calibrated ensemble score
+    ml_score = prob * 100
+    risk_score = round(0.6 * ml_score + 0.4 * clinical_score)
+    
+    # Floor adjustment based on active clinical symptoms
+    if symptom_count >= 2 and risk_score < 35:
+        risk_score = 35 + (symptom_count * 5)
+    elif symptom_count == 0 and not s.irregularPeriods and not s.noPeriods and bmi_val < 25:
+        risk_score = min(risk_score, 15)
+
+    risk_score = min(98, max(2, risk_score))
     
     # Risk Level mapping
     if risk_score <= 30:
