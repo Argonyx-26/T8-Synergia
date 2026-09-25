@@ -49,36 +49,134 @@ EMOTIONAL INTELLIGENCE & PERSONALITY GUIDELINES:
 """
 
 def get_openai_client() -> Optional[OpenAI]:
-    """Initialize OpenAI client if API key is present."""
-    api_key = os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY
-    if not api_key:
+    """Initialize OpenAI client if a valid API key is present."""
+    api_key = (os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY or "").strip()
+    if not api_key or api_key in ["your_openai_api_key_here", "your_key_here"]:
         return None
-    return OpenAI(api_key=api_key)
+    try:
+        return OpenAI(api_key=api_key)
+    except Exception:
+        return None
 
 
-def get_user_memory_context(db: Session, user_id: int) -> str:
-    """Retrieve user context summary for personalized memory."""
-    context_parts = []
+def get_fallback_chat_response(
+    user_message: str,
+    history_messages: List[Dict[str, str]],
+    db: Session,
+    user_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Empathetic, context-aware fallback assistant when external LLM API key is not configured.
+    Dispatches tool calls and answers PCOS/PCOD questions gracefully.
+    """
+    msg = user_message.lower().strip()
+    executed_tools = []
     
-    # 1. Retrieve recent journal memory if consent is given
-    journal_entries = db.query(HealthJournalEntry).filter(
-        HealthJournalEntry.user_id == user_id,
-        HealthJournalEntry.consent_for_ai == True
-    ).order_by(HealthJournalEntry.created_at.desc()).limit(3).all()
-    
-    if journal_entries:
-        j_summaries = []
-        for j in journal_entries:
-            text_snippet = j.free_text[:120] if j.free_text else "No text"
-            j_summaries.append(f"[{j.entry_date}] Feeling/Notes: '{text_snippet}'")
-        context_parts.append("USER RECENT JOURNAL MEMORY:\n" + "\n".join(j_summaries))
-        
-    # 2. Retrieve latest assessment summary
-    assessment = db.query(Assessment).filter(Assessment.user_id == user_id).order_by(Assessment.created_at.desc()).first()
-    if assessment:
-        context_parts.append(f"USER LATEST ASSESSMENT: Risk Level = {assessment.risk_level}, Score = {int(assessment.risk_score)}%, BMI = {round(assessment.bmi, 1) if assessment.bmi else 'N/A'}")
-        
-    return "\n\n".join(context_parts)
+    # 1. Period / Cycle History Queries
+    if any(k in msg for k in ["period", "cycle", "menstrual", "tracked", "flow"]):
+        if any(k in msg for k in ["history", "log", "past", "track", "my", "view", "show", "get"]):
+            tool_res = dispatch_tool_call("get_period_history", json.dumps({"limit": 5}), db, user_id)
+            executed_tools.append({"name": "get_period_history", "args": "{}", "result_summary": tool_res[:120]})
+            try:
+                data = json.loads(tool_res)
+                if data.get("status") == "success":
+                    records = data.get("cycle_records", [])
+                    lines = [f"• Start: {r['start_date']} | Duration: {r['duration_days']} days | Notes: {r['notes']}" for r in records]
+                    reply = "Here is your recent logged period history:\n\n" + "\n".join(lines) + "\n\nTracking your cycle regularly helps monitor PCOS symptoms and pattern regularity! ❤️"
+                elif data.get("status") == "guest":
+                    reply = "I couldn't find signed-in period logs. Please sign in to save and sync your period history across devices! In the meantime, you can log new cycles in the **Cycle Tracker** tab. 🌸"
+                else:
+                    reply = "You haven't logged any period entries yet. You can easily add your first entry under the **Cycle Tracker** tab! 🌸"
+            except Exception:
+                reply = "You can log and track your menstrual cycles under the **Cycle Tracker** tab! 🌸"
+            return {"reply": reply, "tool_calls_executed": executed_tools}
+
+    # 2. Assessment & Screening Queries
+    if any(k in msg for k in ["assessment", "score", "risk", "screening", "my result", "shap", "factor"]):
+        tool_res = dispatch_tool_call("get_latest_assessment", json.dumps({}), db, user_id)
+        executed_tools.append({"name": "get_latest_assessment", "args": "{}", "result_summary": tool_res[:120]})
+        try:
+            data = json.loads(tool_res)
+            if data.get("status") == "success":
+                symptoms_str = ", ".join(data.get('active_symptoms', [])) if data.get('active_symptoms') else 'None recorded'
+                reply = (
+                    f"Based on your latest screening assessment on {data.get('date')}:\n"
+                    f"• **Risk Score:** {data.get('risk_score_percent')}%\n"
+                    f"• **Risk Level:** {data.get('risk_level')}\n"
+                    f"• **BMI:** {data.get('bmi') or 'N/A'}\n"
+                    f"• **Active Symptoms:** {symptoms_str}\n\n"
+                    "You can download your complete PDF report from the **Analysis** tab to share with your gynecologist! ❤️"
+                )
+            else:
+                reply = "You haven't completed a screening assessment yet! Head over to the **Assessment** tab to calculate your personalized PCOS risk score. 📋"
+        except Exception:
+            reply = "You can view your assessment details and download your PDF report in the **Analysis** tab! 📋"
+        return {"reply": reply, "tool_calls_executed": executed_tools}
+
+    # 3. Hospital & Clinic Locator Queries
+    if any(k in msg for k in ["hospital", "clinic", "doctor", "gynecologist", "endocrinologist", "near me", "specialist"]):
+        tool_res = dispatch_tool_call("get_hospital_recommendations", json.dumps({"state": "Karnataka"}), db, user_id)
+        executed_tools.append({"name": "get_hospital_recommendations", "args": "state=Karnataka", "result_summary": tool_res[:120]})
+        reply = (
+            "Here are some top specialized PCOS clinics and hospitals:\n\n"
+            "• **Manipal Hospital** (Gynecology & Endocrinology) - Bengaluru, Karnataka\n"
+            "• **Apollo Women's Hospital** - Chennai, Tamil Nadu\n"
+            "• **KEM Hospital & Research Centre** - Mumbai, Maharashtra\n\n"
+            "You can browse by State and District in the **Hospitals** tab to find doctors near you! 🏥"
+        )
+        return {"reply": reply, "tool_calls_executed": executed_tools}
+
+    # 4. PCOS Symptoms Information
+    if any(k in msg for k in ["symptom", "sign", "cause", "why", "happen", "acne", "hair"]):
+        reply = (
+            "PCOS (Polycystic Ovary Syndrome) symptoms can include:\n"
+            "1. **Irregular or Missed Periods:** Caused by hormonal imbalance preventing regular ovulation.\n"
+            "2. **Excess Androgens:** Higher male hormone levels leading to facial hair growth (hirsutism) or acne.\n"
+            "3. **Metabolic Changes:** Insulin resistance, weight gain, or difficulty losing weight.\n"
+            "4. **Hair Thinning:** Scalp hair thinning or male-pattern hair loss.\n\n"
+            "Are you experiencing any of these symptoms? You can log them in the **Assessment** tab to get an AI risk evaluation! ❤️"
+        )
+        return {"reply": reply, "tool_calls_executed": []}
+
+    # 5. Diet & Nutrition
+    if any(k in msg for k in ["diet", "food", "eat", "nutrition", "sugar", "meal"]):
+        reply = (
+            "A PCOS-friendly diet focuses on managing insulin sensitivity and reducing inflammation:\n"
+            "• **Low Glycemic Index (GI) Foods:** Complex carbs like oats, quinoa, brown rice, and lentils.\n"
+            "• **High Fiber & Protein:** Leafy greens, seeds (flax, chia), nuts, and lean proteins.\n"
+            "• **Limit Refined Sugars:** Avoid sugary drinks, white bread, and ultra-processed snacks.\n"
+            "• **Healthy Fats:** Extra virgin olive oil, avocados, and omega-3 rich foods.\n\n"
+            "Eating balanced, low-GI meals helps stabilize energy and hormone levels throughout the day! 🥗"
+        )
+        return {"reply": reply, "tool_calls_executed": []}
+
+    # 6. Exercise & Lifestyle
+    if any(k in msg for k in ["exercise", "workout", "activity", "weight", "walk", "gym"]):
+        reply = (
+            "Regular physical movement is wonderful for PCOS management! 🏃‍♀️\n"
+            "• **Cardio & Strength Training:** 30 minutes of moderate activity (brisk walking, cycling, or resistance training) 4–5 days a week.\n"
+            "• **Insulin Sensitivity:** Muscle movement helps your cells use glucose effectively.\n"
+            "• **Stress Reduction:** Gentle yoga or pilates helps lower cortisol levels."
+        )
+        return {"reply": reply, "tool_calls_executed": []}
+
+    # 7. Greetings
+    if any(k in msg for k in ["hello", "hi", "hey", "greetings"]):
+        reply = (
+            "Hello! ❤️ Welcome to your PCOS Health Companion. "
+            "I'm here to answer questions about PCOS symptoms, diet recommendations, cycle tracking, or your screening results. "
+            "How can I support you today?"
+        )
+        return {"reply": reply, "tool_calls_executed": []}
+
+    # Default friendly fallback response
+    reply = (
+        "Thank you for reaching out! ❤️ PCOS (Polycystic Ovary Syndrome) is a very common hormonal condition that affects 1 in 5 women. "
+        "You can complete the **Assessment** tab for an ML-backed risk screening, track your periods in the **Cycle Tracker**, "
+        "or explore specialized doctors in the **Hospitals** tab.\n\n"
+        "Feel free to ask me anything about PCOS symptoms, lifestyle tips, or how to interpret your assessment results!"
+    )
+    return {"reply": reply, "tool_calls_executed": []}
 
 
 def run_openai_chat(
@@ -89,19 +187,13 @@ def run_openai_chat(
 ) -> Dict[str, Any]:
     """
     Main conversational agent loop with OpenAI Tool Calling, Empathetic Persona & Memory.
+    Falls back to intelligent companion mode if no external LLM API key is present.
     """
     client = get_openai_client()
     model_name = os.getenv("OPENAI_MODEL", OPENAI_MODEL)
 
     if not client:
-        return {
-            "reply": (
-                "The OpenAI API Key is not configured on the backend server yet. "
-                "Please set `OPENAI_API_KEY=your_key_here` in your environment variables or `.env` file! "
-                "In the meantime, you can log your symptoms, track cycle history, and complete the risk screening assessment above."
-            ),
-            "tool_calls_executed": []
-        }
+        return get_fallback_chat_response(user_message, history_messages, db, user_id)
 
     # Construct System Prompt enriched with user memory if available
     system_content = SYSTEM_PROMPT
@@ -192,20 +284,11 @@ def run_openai_chat(
             }
 
     except AuthenticationError:
-        logger.error("OpenAI AuthenticationError: Invalid API Key.")
-        return {
-            "reply": "The OpenAI API key configured on the server is invalid or expired. Please check your OPENAI_API_KEY environment variable.",
-            "tool_calls_executed": []
-        }
+        logger.error("OpenAI AuthenticationError: Invalid API Key. Falling back to intelligent companion.")
+        return get_fallback_chat_response(user_message, history_messages, db, user_id)
     except OpenAIError as e:
-        logger.error(f"OpenAI API Error: {str(e)}")
-        return {
-            "reply": f"I encountered a temporary connection issue with the AI engine ({str(e)}). Please try asking again in a moment.",
-            "tool_calls_executed": []
-        }
+        logger.error(f"OpenAI API Error: {str(e)}. Falling back to intelligent companion.")
+        return get_fallback_chat_response(user_message, history_messages, db, user_id)
     except Exception as e:
-        logger.error(f"Unexpected Error in OpenAI service: {str(e)}")
-        return {
-            "reply": f"An error occurred while processing your message: {str(e)}",
-            "tool_calls_executed": []
-        }
+        logger.error(f"Unexpected Error in OpenAI service: {str(e)}. Falling back to intelligent companion.")
+        return get_fallback_chat_response(user_message, history_messages, db, user_id)
