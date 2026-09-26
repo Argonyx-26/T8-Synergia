@@ -203,8 +203,85 @@ def run_openai_chat(
     user_id: Optional[int] = None
 ) -> Dict[str, Any]:
     """
-    Main conversational agent loop supporting Anthropic Claude, OpenAI, or Intelligent Fallback Companion.
+    Main conversational agent loop supporting OpenAI (with Tool Calling), Anthropic Claude, or Intelligent Fallback Companion.
     """
+    openai_client = get_openai_client()
+    if openai_client:
+        try:
+            system_content = SYSTEM_PROMPT
+            if user_id:
+                memory_summary = get_user_memory_context(db, user_id)
+                if memory_summary:
+                    system_content += f"\n\nAUTHENTICATED USER HEALTH & JOURNAL MEMORY CONTEXT:\n{memory_summary}"
+
+            messages: List[Dict[str, Any]] = [
+                {"role": "system", "content": system_content}
+            ]
+
+            for msg in history_messages[-10:]:
+                raw_role = (msg.get("role") or msg.get("sender") or "user").lower()
+                role = "assistant" if raw_role in ["assistant", "bot", "model", "ai"] else "user"
+                content = msg.get("content") or msg.get("text") or ""
+                if content:
+                    messages.append({"role": role, "content": content})
+
+            messages.append({"role": "user", "content": user_message})
+            model_name = os.getenv("OPENAI_MODEL", OPENAI_MODEL)
+
+            response = openai_client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                tools=OPENAI_TOOLS,
+                tool_choice="auto",
+                temperature=0.7,
+                max_tokens=800
+            )
+
+            response_message = response.choices[0].message
+            tool_calls = response_message.tool_calls
+            executed_tools = []
+
+            if tool_calls:
+                messages.append(response_message)
+                for tool_call in tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = tool_call.function.arguments
+                    tool_result = dispatch_tool_call(
+                        tool_name=function_name,
+                        arguments_json=function_args,
+                        db=db,
+                        user_id=user_id
+                    )
+                    executed_tools.append({
+                        "name": function_name,
+                        "args": function_args,
+                        "result_summary": tool_result[:120]
+                    })
+                    messages.append({
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": tool_result
+                    })
+
+                second_response = openai_client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=800
+                )
+                return {
+                    "reply": second_response.choices[0].message.content or "I have processed your request.",
+                    "tool_calls_executed": executed_tools
+                }
+            else:
+                return {
+                    "reply": response_message.content or "I am here to support your PCOS health journey. How can I help today?",
+                    "tool_calls_executed": []
+                }
+        except Exception as e:
+            logger.error(f"OpenAI API Error: {str(e)}. Falling through to Anthropic / Companion Fallback.")
+
     anthropic_client = get_anthropic_client()
     if anthropic_client:
         try:
@@ -231,115 +308,12 @@ def run_openai_chat(
                 system=system_content,
                 messages=anthropic_messages
             )
-            reply_text = response.content[0].text
             return {
-                "reply": reply_text,
+                "reply": response.content[0].text,
                 "tool_calls_executed": []
             }
         except Exception as e:
             logger.error(f"Anthropic API Error: {str(e)}. Falling back to companion response.")
             return get_fallback_chat_response(user_message, history_messages, db, user_id)
 
-    client = get_openai_client()
-    model_name = os.getenv("OPENAI_MODEL", OPENAI_MODEL)
-
-    if not client:
-        return get_fallback_chat_response(user_message, history_messages, db, user_id)
-
-    # Construct System Prompt enriched with user memory if available
-    system_content = SYSTEM_PROMPT
-    if user_id:
-        memory_summary = get_user_memory_context(db, user_id)
-        if memory_summary:
-            system_content += f"\n\nAUTHENTICATED USER HEALTH & JOURNAL MEMORY CONTEXT:\n{memory_summary}"
-
-    messages: List[Dict[str, Any]] = [
-        {"role": "system", "content": system_content}
-    ]
-
-    # Append past conversation history with role normalization
-    for msg in history_messages[-10:]:
-        raw_role = (msg.get("role") or msg.get("sender") or "user").lower()
-        role = "assistant" if raw_role in ["assistant", "bot", "model", "ai"] else "user"
-        content = msg.get("content") or msg.get("text") or ""
-        if content:
-            messages.append({"role": role, "content": content})
-
-    # Append current user prompt
-    messages.append({"role": "user", "content": user_message})
-
-    executed_tools = []
-
-    try:
-        # Initial call to OpenAI Chat Completion with tools
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            tools=OPENAI_TOOLS,
-            tool_choice="auto",
-            temperature=0.7,
-            max_tokens=800
-        )
-
-        response_message = response.choices[0].message
-        tool_calls = response_message.tool_calls
-
-        # Process tool calls requested by the model
-        if tool_calls:
-            messages.append(response_message)
-
-            for tool_call in tool_calls:
-                function_name = tool_call.function.name
-                function_args = tool_call.function.arguments
-                logger.info(f"Executing tool call: {function_name} with args: {function_args}")
-
-                tool_result = dispatch_tool_call(
-                    tool_name=function_name,
-                    arguments_json=function_args,
-                    db=db,
-                    user_id=user_id
-                )
-
-                executed_tools.append({
-                    "name": function_name,
-                    "args": function_args,
-                    "result_summary": tool_result[:120]
-                })
-
-                messages.append({
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": function_name,
-                    "content": tool_result
-                })
-
-            # Follow-up completion call after tool execution
-            second_response = client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=800
-            )
-
-            final_text = second_response.choices[0].message.content or "I have processed your request."
-            return {
-                "reply": final_text,
-                "tool_calls_executed": executed_tools
-            }
-
-        else:
-            final_text = response_message.content or "I am here to support your PCOS health journey. How can I help today?"
-            return {
-                "reply": final_text,
-                "tool_calls_executed": []
-            }
-
-    except AuthenticationError:
-        logger.error("OpenAI AuthenticationError: Invalid API Key. Falling back to intelligent companion.")
-        return get_fallback_chat_response(user_message, history_messages, db, user_id)
-    except OpenAIError as e:
-        logger.error(f"OpenAI API Error: {str(e)}. Falling back to intelligent companion.")
-        return get_fallback_chat_response(user_message, history_messages, db, user_id)
-    except Exception as e:
-        logger.error(f"Unexpected Error in OpenAI service: {str(e)}. Falling back to intelligent companion.")
-        return get_fallback_chat_response(user_message, history_messages, db, user_id)
+    return get_fallback_chat_response(user_message, history_messages, db, user_id)
