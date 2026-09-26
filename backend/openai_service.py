@@ -66,11 +66,14 @@ def get_anthropic_client():
 
 
 def get_openai_client() -> Optional[OpenAI]:
-    """Initialize OpenAI client if a valid API key is present."""
-    api_key = (os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY or "").strip()
+    """Initialize OpenAI client pointing at Groq or OpenAI base URL."""
+    api_key = (os.getenv("GROQ_API_KEY") or os.getenv("OPENAI_API_KEY") or OPENAI_API_KEY or "").strip()
     if not api_key or api_key in ["your_openai_api_key_here", "your_key_here"] or api_key.startswith("sk-ant-"):
         return None
     try:
+        if api_key.startswith("gsk_") or os.getenv("GROQ_BASE_URL"):
+            base_url = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+            return OpenAI(api_key=api_key, base_url=base_url)
         return OpenAI(api_key=api_key)
     except Exception:
         return None
